@@ -16,6 +16,7 @@ def get_weather():
  url = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric'
  response = requests.get(url).json()
 
+# Validating user input: if city code not found error message is returned
  if response.get('cod') != 200:
      return render_template('index.html', error="City not found.")
 
