@@ -1,37 +1,110 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
+from dotenv import load_dotenv
+import os
 import requests
+from datetime import datetime
+load_dotenv()
+API_KEY = os.getenv('API_KEY')
+
+
 
 app = Flask(__name__)
 
-#  OpenWeather API key
-API_KEY = 'a751ad7f764913ba8f4003aafc391f3d'
+
+def get_weather_data(lat, lon):
+    current_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={API_KEY}&units=metric"
+    current_response = requests.get(current_url).json()
+    
+    forecast_url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={API_KEY}&units=metric"
+    forecast_response = requests.get(forecast_url).json()
+    
+    pollution_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
+    pollution_response = requests.get(pollution_url).json()
+    
+    daily_forecasts = {}
+    for item in forecast_response['list']:
+        day = datetime.fromtimestamp(item['dt']).strftime('%A')
+        temp_min = item['main']['temp_min']
+        temp_max = item['main']['temp_max']
+
+        if day not in daily_forecasts:
+            daily_forecasts[day] = {
+                'temp_min': temp_min,
+                'temp_max': temp_max,
+                'icon': item['weather'][0]['icon'],
+                'description': item['weather'][0]['description']
+            }
+        else:
+            daily_forecasts[day]['temp_min'] = min(daily_forecasts[day]['temp_min'], temp_min)
+            daily_forecasts[day]['temp_max'] = max(daily_forecasts[day]['temp_max'], temp_max)
+
+    forecast = []
+    for day, data in list(daily_forecasts.items())[:5]:
+        forecast.append({
+            'day': day,
+            'temp_min': data['temp_min'],
+            'temp_max': data['temp_max'],
+            'description': data['description'],
+            'icon': data['icon']
+        })
+
+    weather_data = {
+        'current': {
+            'temp': current_response['main']['temp'],
+            'feels_like': current_response['main']['feels_like'],
+            'humidity': current_response['main']['humidity'],
+            'wind_speed': current_response['wind']['speed'],
+            'description': current_response['weather'][0]['description'],
+            'icon': current_response['weather'][0]['icon'],
+            'day': datetime.fromtimestamp(current_response['dt']).strftime('%A'),
+            'city': current_response['name'],
+            'country': current_response['sys']['country'],
+            'temp_min': current_response['main']['temp_min'],
+            'temp_max': current_response['main']['temp_max']
+        },
+        'forecast': forecast,
+        'pollution': {
+            'aqi': pollution_response['list'][0]['main']['aqi'],
+            'components': pollution_response['list'][0]['components']
+        }
+    }
+    
+    return weather_data
 
 @app.route('/')
 def index():
- return render_template('index.html')
+    return render_template('index.html')
 
-@app.route('/weather', methods=['POST'])
+@app.route('/get_weather', methods=['POST'])
 def get_weather():
- city = request.form['city']
- url = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric'
- response = requests.get(url).json()
-
-# Validating user input: if city code not found error message is returned
- if response.get('cod') != 200:
-     return render_template('index.html', error="City not found.")
-
- weather_data = {
-     'city': city,
-     'temperature': response['main']['temp'],
-     'description': response['weather'][0]['description'],
-     'humidity': response['main']['humidity'],
-     'wind_speed': response['wind']['speed'],
-     'pressure': response['main']['pressure'],
-     'icon': response['weather'][0]['icon']
-
- }
- return render_template('result.html', weather=weather_data)
+    data = request.get_json()
+    location = data.get('location', '')
+    lat = data.get('lat')
+    lon = data.get('lon')
+    
+    if not (lat and lon):
+        location_parts = [part.strip() for part in location.split(',')]
+        city = location_parts[0]
+        country_code = location_parts[1] if len(location_parts) > 1 else ''
+        
+        if country_code:
+            geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={city},{country_code}&limit=1&appid={API_KEY}"
+        else:
+            geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={city}&limit=1&appid={API_KEY}"
+            
+        geo_response = requests.get(geo_url).json()
+        
+        if not geo_response:
+            return jsonify({'error': 'Location not found'})
+        
+        lat = geo_response[0]['lat']
+        lon = geo_response[0]['lon']
+    
+    try:
+        weather_data = get_weather_data(lat, lon)
+        return jsonify(weather_data)
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 if __name__ == '__main__':
- app.run(debug=True)
-
+    app.run(debug=True)
