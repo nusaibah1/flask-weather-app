@@ -1,25 +1,273 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1.0">
- <title>Weather-Forecast-App</title>
- <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
- <link rel="stylesheet" href="stylesheet.css">
+    <title>Advanced Weather App</title>
+    <style>
+        #error-container {
+            color: red;
+            display: none;
+            margin: 10px 0;
+        }
+    </style>
 </head>
 <body>
- <div class="container mt-5">
-     <h1 class="text-center">Weatherwise Hackathon</h1>
-     <form action="/weather" method="POST" class="mt-3">
-         <div class="form-group">
-             <label for="city" style="font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;">Enter City:</label>
-             <input type="text" class="form-control" id="city" name="city" required>
-         </div>
-         <button type="submit" class="btn btn-secondary" style="font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;">Get Weather</button>
-     </form>
-     {% if error %}
-     <div class="alert alert-danger mt-4">{{ error }}</div>
-     {% endif %}
- </div>
+    <h1>Weather Information</h1>
+   
+    <form id="city-form">
+        <input type="text" id="city-input" placeholder="Enter city name" required>
+        <button type="submit">Get Weather</button>
+    </form>
+
+
+    <div id="error-container"></div>
+    <div id="weather-container"></div>
+
+
+    <script src="weather.js"></script>
+</body>
+</html>
+
+
+        <!-- Display Location Weather Information -->
+        <p id="status"></p>
+        <a id="map-link" target="_blank"></a>
+
+
+        {% if error %}
+        <div class="alert alert-danger mt-4">{{ error }}</div>
+        {% endif %}
+
+
+        <script>
+    // Weather App with Robust Error Handling and Caching
+        class WeatherApp {
+        constructor(apiKey) {
+        this.API_KEY = apiKey;
+        this.CACHE_DURATION = 10 * 60 * 1000; // 10 minutes cache
+        this.weatherCache = new Map();
+    }
+
+
+    // Robust caching mechanism
+    setCachedWeather(key, data) {
+        this.weatherCache.set(key, {
+            timestamp: Date.now(),
+            data: data
+        });
+    }
+
+
+    getCachedWeather(key) {
+        const cached = this.weatherCache.get(key);
+       
+        // Check if cache exists and is not expired
+        if (cached && (Date.now() - cached.timestamp) < this.CACHE_DURATION) {
+            return cached.data;
+        }
+       
+        return null;
+    }
+
+
+    // Enhanced error handling for API calls
+    async fetchWeatherData(url) {
+        try {
+            const response = await fetch(url);
+           
+            if (!response.ok) {
+                // Detailed error parsing
+                const errorBody = await response.json();
+                throw new Error(errorBody.message || 'Weather data retrieval failed');
+            }
+           
+            return await response.json();
+        } catch (error) {
+            // Comprehensive error handling
+            this.handleError(error);
+            throw error;
+        }
+    }
+
+
+    // Centralized error handling
+    handleError(error) {
+        console.error('Weather App Error:', error);
+       
+        let userMessage = 'An unexpected error occurred';
+       
+        if (error.message.includes('city not found')) {
+            userMessage = 'City not found. Please check the city name.';
+        } else if (error.message.includes('404')) {
+            userMessage = 'Location not found. Please try again.';
+        } else if (error.message.includes('network')) {
+            userMessage = 'Network error. Please check your internet connection.';
+        } else if (error.message.includes('permission')) {
+            userMessage = 'Location access denied. Please enable location services.';
+        }
+       
+        // Update UI with error message
+        this.displayError(userMessage);
+    }
+
+
+    // Geolocation with advanced error handling
+    getWeatherByLocation() {
+        return new Promise((resolve, reject) => {
+            // Check geolocation support
+            if (!navigator.geolocation) {
+                this.handleError(new Error('Geolocation not supported'));
+                reject(new Error('Geolocation not supported'));
+                return;
+            }
+
+
+            // Geolocation options
+            const options = {
+                enableHighAccuracy: true,
+                timeout: 5000,
+                maximumAge: 0
+            };
+
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    const { latitude, longitude } = position.coords;
+                    const cacheKey = `location:${latitude},${longitude}`;
+                   
+                    // Check cache first
+                    const cachedWeather = this.getCachedWeather(cacheKey);
+                    if (cachedWeather) {
+                        this.displayWeather(cachedWeather);
+                        resolve(cachedWeather);
+                        return;
+                    }
+
+
+                    try {
+                        const url = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${this.API_KEY}&units=metric`;
+                        const weatherData = await this.fetchWeatherData(url);
+                       
+                        // Cache the result
+                        this.setCachedWeather(cacheKey, weatherData);
+                       
+                        this.displayWeather(weatherData);
+                        resolve(weatherData);
+                    } catch (error) {
+                        reject(error);
+                    }
+                },
+                (error) => {
+                    // Specific geolocation error handling
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            this.handleError(new Error('Location permission denied'));
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            this.handleError(new Error('Location information unavailable'));
+                            break;
+                        case error.TIMEOUT:
+                            this.handleError(new Error('Location request timed out'));
+                            break;
+                        default:
+                            this.handleError(new Error('Unknown location error'));
+                    }
+                    reject(error);
+                },
+                options
+            );
+        });
+    }
+
+
+    // City weather with caching
+    async getWeatherByCity(city) {
+        const cacheKey = `city:${city.toLowerCase()}`;
+       
+        // Check cache first
+        const cachedWeather = this.getCachedWeather(cacheKey);
+        if (cachedWeather) {
+            this.displayWeather(cachedWeather);
+            return cachedWeather;
+        }
+
+
+        try {
+            const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${this.API_KEY}&units=metric`;
+            const weatherData = await this.fetchWeatherData(url);
+           
+            // Cache the result
+            this.setCachedWeather(cacheKey, weatherData);
+           
+            this.displayWeather(weatherData);
+            return weatherData;
+        } catch (error) {
+            // Error already handled by fetchWeatherData
+            throw error;
+        }
+    }
+
+
+    // Display weather information
+    displayWeather(data) {
+        const weatherContainer = document.getElementById('weather-container');
+        weatherContainer.innerHTML = `
+            <div class="weather-card">
+                <h2>${data.name}</h2>
+                <img src="https://openweathermap.org/img/wn/${data.weather[0].icon}@2x.png" alt="Weather Icon">
+                <p>Temperature: ${data.main.temp}°C</p>
+                <p>Feels Like: ${data.main.feels_like}°C</p>
+                <p>Weather: ${data.weather[0].description}</p>
+                <p>Humidity: ${data.main.humidity}%</p>
+                <p>Wind Speed: ${data.wind.speed} m/s</p>
+            </div>
+        `;
+       
+        // Clear any previous errors
+        this.clearError();
+    }
+
+
+    // Error display method
+    displayError(message) {
+        const errorContainer = document.getElementById('error-container');
+        errorContainer.textContent = message;
+        errorContainer.style.display = 'block';
+    }
+
+
+    // Clear error method
+    clearError() {
+        const errorContainer = document.getElementById('error-container');
+        errorContainer.textContent = '';
+        errorContainer.style.display = 'none';
+    }
+}
+
+
+// Initialize the Weather Application
+document.addEventListener('DOMContentLoaded', () => {
+    const weatherApp = new WeatherApp('0a05aaca142eafd2174374fa14f28035');
+
+
+    // Automatic location weather on page load
+    weatherApp.getWeatherByLocation().catch(() => {
+        // Fallback to default location if geolocation fails
+        weatherApp.getWeatherByCity('Cape Town');
+    });
+
+
+    // City search form
+    document.getElementById('city-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const cityInput = document.getElementById('city-input');
+        weatherApp.getWeatherByCity(cityInput.value).catch(() => {
+            // Error handling is done within the method
+        });
+    });
+});
+        </script>
+
+
+    </div>
 </body>
 </html>

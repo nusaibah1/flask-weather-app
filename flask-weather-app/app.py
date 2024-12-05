@@ -26,7 +26,9 @@ def get_weather():
      'description': response['weather'][0]['description'],
      'humidity': response['main']['humidity'],
      'wind_speed': response['wind']['speed'],
-     'icon': response['weather'][0]['icon'],
+     'pressure': response['main']['pressure'],
+     'icon': response['weather'][0]['icon']
+
  }
  return render_template('result.html', weather=weather_data)
 
